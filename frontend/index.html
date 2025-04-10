@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Breach Checker</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #4a6fa5;
+            --secondary-color: #166088;
+            --background-color: #f5f7fa;
+            --text-color: #333;
+            --danger-color: #e74c3c;
+            --success-color: #2ecc71;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            max-width: 700px;
+            width: 100%;
+            background-color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: var(--box-shadow);
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        
+        header h1 {
+            color: var(--primary-color);
+            margin-bottom: 0.5rem;
+        }
+        
+        header p {
+            color: #666;
+        }
+        
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+        
+        input[type="email"] {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="email"]:focus {
+            border-color: var(--primary-color);
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(74, 111, 165, 0.2);
+        }
+        
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            width: 100%;
+            font-weight: 600;
+        }
+        
+        button:hover {
+            background-color: var(--secondary-color);
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .loader {
+            display: none;
+            text-align: center;
+            margin: 1rem 0;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 2rem;
+            height: 2rem;
+            border: 3px solid rgba(74, 111, 165, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--primary-color);
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .result {
+            display: none;
+            margin-top: 2rem;
+            padding: 1.5rem;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .compromised {
+            background-color: rgba(231, 76, 60, 0.1);
+            border-left: 4px solid var(--danger-color);
+        }
+        
+        .safe {
+            background-color: rgba(46, 204, 113, 0.1);
+            border-left: 4px solid var(--success-color);
+        }
+        
+        .result i {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+        
+        .result h2 {
+            margin-bottom: 0.5rem;
+        }
+        
+        .result p {
+            color: #555;
+        }
+        
+        .result .checked-time {
+            font-size: 0.85rem;
+            color: #777;
+            margin-top: 1rem;
+        }
+        
+        footer {
+            margin-top: 2rem;
+            text-align: center;
+            color: #888;
+            font-size: 0.85rem;
+        }
+        
+        .error-message {
+            color: var(--danger-color);
+            text-align: left;
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Email Breach Checker</h1>
+            <p>Check if your email has been compromised in a data breach</p>
+        </header>
+        
+        <form id="checkForm">
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" placeholder="Enter your email address" required>
+                <div class="error-message" id="emailError">Please enter a valid email address</div>
+            </div>
+            
+            <button type="submit" id="checkBtn">Check Now</button>
+        </form>
+        
+        <div class="loader" id="loader">
+            <div class="spinner"></div>
+            <p>Checking your email...</p>
+        </div>
+        
+        <div class="result" id="resultSafe">
+            <i class="fas fa-shield-alt" style="color: var(--success-color);"></i>
+            <h2>Your Email is Secure</h2>
+            <p>Good news! Your email address doesn't appear in our database of known breaches.</p>
+            <p>However, we recommend regularly updating your passwords and using a password manager.</p>
+            <div class="checked-time" id="checkedTimeSafe"></div>
+        </div>
+        
+        <div class="result" id="resultCompromised">
+            <i class="fas fa-exclamation-triangle" style="color: var(--danger-color);"></i>
+            <h2>Your Email Has Been Compromised</h2>
+            <p>Unfortunately, your email appears in our database of known data breaches.</p>
+            <p>We recommend you take the following actions:</p>
+            <ul style="text-align: left; margin-top: 1rem;">
+                <li>Change your password immediately</li>
+                <li>Enable two-factor authentication if available</li>
+                <li>Check for suspicious activities in your account</li>
+                <li>Don't reuse passwords across different services</li>
+            </ul>
+            <div class="checked-time" id="checkedTimeCompromised"></div>
+        </div>
+        
+        <footer>
+            <p>This service checks your email against a database of known breaches. Your email is hashed and never stored in plain text.</p>
+        </footer>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('checkForm');
+            const emailInput = document.getElementById('email');
+            const emailError = document.getElementById('emailError');
+            const checkBtn = document.getElementById('checkBtn');
+            const loader = document.getElementById('loader');
+            const resultSafe = document.getElementById('resultSafe');
+            const resultCompromised = document.getElementById('resultCompromised');
+            const checkedTimeSafe = document.getElementById('checkedTimeSafe');
+            const checkedTimeCompromised = document.getElementById('checkedTimeCompromised');
+            
+            // Email validation regex
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            
+            // Validate email on input
+            emailInput.addEventListener('input', function() {
+                if (this.value && !emailRegex.test(this.value)) {
+                    emailError.style.display = 'block';
+                    checkBtn.disabled = true;
+                } else {
+                    emailError.style.display = 'none';
+                    checkBtn.disabled = false;
+                }
+            });
+            
+            // Form submission
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const email = emailInput.value.trim();
+                
+                if (!email || !emailRegex.test(email)) {
+                    emailError.style.display = 'block';
+                    return;
+                }
+                
+                // Hide results and show loader
+                resultSafe.style.display = 'none';
+                resultCompromised.style.display = 'none';
+                loader.style.display = 'block';
+                checkBtn.disabled = true;
+                
+                // Make API request
+                fetch('/api/check', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email: email }),
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Format date/time
+                    const formattedTime = new Date(data.checked_at).toLocaleString();
+                    
+                    // Show appropriate result
+                    if (data.compromised) {
+                        resultCompromised.style.display = 'block';
+                        checkedTimeCompromised.textContent = `Last checked: ${formattedTime}`;
+                        resultCompromised.className = 'result compromised';
+                    } else {
+                        resultSafe.style.display = 'block';
+                        checkedTimeSafe.textContent = `Last checked: ${formattedTime}`;
+                        resultSafe.className = 'result safe';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    resultSafe.style.display = 'block';
+                    resultSafe.className = 'result';
+                    resultSafe.innerHTML = `
+                        <i class="fas fa-exclamation-circle" style="color: #e67e22;"></i>
+                        <h2>Something went wrong</h2>
+                        <p>We couldn't check your email at this time. Please try again later.</p>
+                    `;
+                })
+                .finally(() => {
+                    loader.style.display = 'none';
+                    checkBtn.disabled = false;
+                });
+            });
+        });
+    </script>
+</body>
+</html>
