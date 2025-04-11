@@ -1,0 +1,6 @@
+# ignore certificates and keys
+nginx/certs/server.crt
+nginx/certs/server.key
+
+# ignore logs
+nginx/logs/error.log
