@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -52,9 +54,6 @@ func main() {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
 
-	// Initialize database schema
-	initDB()
-
 	// Initialize Redis connection
 	redisHost := getEnvOrDefault("REDIS_HOST", "redis")
 	redisPort := getEnvOrDefault("REDIS_PORT", "6379")
@@ -69,6 +68,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}
+
+	// Initialize database schema
+	initDB()
 
 	// Setup router
 	r := mux.NewRouter()
@@ -91,14 +93,14 @@ func initDB() {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS compromised_emails (
 			id SERIAL PRIMARY KEY,
-			email_hash VARCHAR(255) NOT NULL UNIQUE,
+			email_hash VARCHAR(64) NOT NULL UNIQUE,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE INDEX IF NOT EXISTS idx_email_hash ON compromised_emails(email_hash);
 		
 		CREATE TABLE IF NOT EXISTS check_history (
 			id SERIAL PRIMARY KEY,
-			email_hash VARCHAR(255) NOT NULL,
+			email_hash VARCHAR(64) NOT NULL UNIQUE,
 			checked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			was_compromised BOOLEAN NOT NULL
 		);
@@ -106,46 +108,52 @@ func initDB() {
 	if err != nil {
 		log.Fatalf("Failed to initialize database schema: %v", err)
 	}
-	
+
 	// Seed some sample compromised emails for testing
 	sampleEmails := []string{
 		"compromised@example.com",
 		"test.breach@gmail.com",
 		"hacked@yahoo.com",
 	}
-	
+
 	for _, email := range sampleEmails {
-		hash, _ := bcrypt.GenerateFromPassword([]byte(email), bcrypt.DefaultCost)
+
+		hash := hashEmail(email)
+		// Insert into DB
 		_, err := db.Exec(`
 			INSERT INTO compromised_emails (email_hash) 
 			VALUES ($1) 
-			ON CONFLICT (email_hash) DO NOTHING`, 
-			string(hash))
+			ON CONFLICT (email_hash) DO NOTHING`,
+			hash)
 		if err != nil {
 			log.Printf("Warning: Failed to seed email %s: %v", email, err)
 		}
 	}
+
 }
 
 func checkEmailHandler(w http.ResponseWriter, r *http.Request) {
 	var emailCheck EmailCheck
-	
+
 	// Parse JSON request
 	err := json.NewDecoder(r.Body).Decode(&emailCheck)
 	if err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
+
 	if emailCheck.Email == "" {
 		http.Error(w, "Email address is required", http.StatusBadRequest)
 		return
 	}
 
+	// Hash the email
+	hashed := hashEmail(emailCheck.Email)
+	cacheKey := fmt.Sprintf("email_check:%s", hashed)
+
 	// Check cache first
-	cacheKey := fmt.Sprintf("email_check:%s", emailCheck.Email)
 	cachedResult, err := redisClient.Get(ctx, cacheKey).Result()
-	
+
 	if err == nil {
 		// Found in cache
 		var result EmailCheck
@@ -159,21 +167,21 @@ func checkEmailHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Not found in cache or error, check database
 	compromised := isEmailCompromised(emailCheck.Email)
-	
+
 	// Create result
 	result := EmailCheck{
 		Email:       emailCheck.Email,
 		Compromised: compromised,
 		CheckedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
-	
+
 	// Store in cache for 1 hour
 	resultJSON, _ := json.Marshal(result)
 	redisClient.Set(ctx, cacheKey, resultJSON, time.Hour)
-	
+
 	// Log this check in history
 	logEmailCheck(emailCheck.Email, compromised)
-	
+
 	// Return result
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Cache", "MISS")
@@ -182,19 +190,18 @@ func checkEmailHandler(w http.ResponseWriter, r *http.Request) {
 
 func isEmailCompromised(email string) bool {
 	// Hash the email for security (we don't store plain emails)
-	hash, _ := bcrypt.GenerateFromPassword([]byte(email), bcrypt.DefaultCost)
-	emailHash := string(hash)
-	
+	emailHash := hashEmail(email)
+
 	// Check if email hash exists in database
 	var exists bool
 	query := `SELECT EXISTS(SELECT 1 FROM compromised_emails WHERE email_hash = $1)`
 	err := db.QueryRow(query, emailHash).Scan(&exists)
-	
+
 	if err != nil {
 		log.Printf("Database query error: %v", err)
 		return false
 	}
-	
+
 	return exists
 }
 
@@ -202,13 +209,13 @@ func logEmailCheck(email string, wasCompromised bool) {
 	// Hash email for privacy
 	hash, _ := bcrypt.GenerateFromPassword([]byte(email), bcrypt.DefaultCost)
 	emailHash := string(hash)
-	
+
 	// Insert check record
 	_, err := db.Exec(
 		`INSERT INTO check_history (email_hash, was_compromised) VALUES ($1, $2)`,
 		emailHash, wasCompromised,
 	)
-	
+
 	if err != nil {
 		log.Printf("Failed to log email check: %v", err)
 	}
@@ -217,10 +224,10 @@ func logEmailCheck(email string, wasCompromised bool) {
 func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	// Check database connection
 	dbErr := db.Ping()
-	
+
 	// Check Redis connection
 	_, redisErr := redisClient.Ping(ctx).Result()
-	
+
 	health := map[string]interface{}{
 		"status":  "up",
 		"db":      dbErr == nil,
@@ -228,11 +235,11 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 		"time":    time.Now().UTC().Format(time.RFC3339),
 		"version": "1.0.0",
 	}
-	
+
 	if dbErr != nil || redisErr != nil {
 		health["status"] = "degraded"
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(health)
 }
@@ -243,12 +250,12 @@ func corsMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		
+
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -283,4 +290,10 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func hashEmail(email string) string {
+	h := sha256.New()
+	h.Write([]byte(email))
+	return hex.EncodeToString(h.Sum(nil))
 }
